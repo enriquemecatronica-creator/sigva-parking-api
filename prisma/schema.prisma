@@ -1,0 +1,137 @@
+// backend/prisma/schema.prisma
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["sigva"]
+}
+
+// ─── Usuarios ─────────────────────────────────────────────────────────────────
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  phone     String?
+  password  String
+  role      Role     @default(DRIVER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tickets   ParkingTicket[]
+
+  @@map("users")
+  @@schema("sigva")
+}
+
+enum Role {
+  DRIVER
+  OPERATOR
+  ADMIN
+
+  @@schema("sigva")
+}
+
+// ─── Zonas de estacionamiento ─────────────────────────────────────────────────
+model ParkingZone {
+  id             String   @id @default(cuid())
+  name           String
+  address        String
+  latitude       Float
+  longitude      Float
+  totalSpots     Int
+  ratePerHour    Float    @default(15.0)
+  currency       String   @default("MXN")
+  openTime       String   @default("08:00")
+  closeTime      String   @default("22:00")
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  spots ParkingSpot[]
+
+  @@map("parking_zones")
+  @@schema("sigva")
+}
+
+// ─── Cajones individuales ─────────────────────────────────────────────────────
+model ParkingSpot {
+  id        String     @id @default(cuid())
+  zoneId    String
+  number    String     // e.g. "A-01"
+  status    SpotStatus @default(FREE)
+  type      SpotType   @default(STANDARD)
+  latitude  Float?
+  longitude Float?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  zone    ParkingZone    @relation(fields: [zoneId], references: [id])
+  tickets ParkingTicket[]
+
+  @@unique([zoneId, number])
+  @@map("parking_spots")
+  @@schema("sigva")
+}
+
+enum SpotStatus {
+  FREE
+  OCCUPIED
+  RESERVED
+  DISABLED
+
+  @@schema("sigva")
+}
+
+enum SpotType {
+  STANDARD
+  DISABLED
+  ELECTRIC
+
+  @@schema("sigva")
+}
+
+// ─── Tickets de estacionamiento ───────────────────────────────────────────────
+model ParkingTicket {
+  id              String         @id @default(cuid())
+  userId          String
+  spotId          String
+  licensePlate    String
+  status          TicketStatus   @default(ACTIVE)
+  entryTime       DateTime       @default(now())
+  exitTime        DateTime?
+  durationMinutes Int?
+  amountDue       Float?
+  amountPaid      Float?
+  paymentMethod   PaymentMethod?
+  qrCode          String?        @unique
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  user  User        @relation(fields: [userId], references: [id])
+  spot  ParkingSpot @relation(fields: [spotId], references: [id])
+
+  @@map("parking_tickets")
+  @@schema("sigva")
+}
+
+enum TicketStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+
+  @@schema("sigva")
+}
+
+enum PaymentMethod {
+  CARD
+  CASH
+  WALLET
+  QR
+
+  @@schema("sigva")
+}
