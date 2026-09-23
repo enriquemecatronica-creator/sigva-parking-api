@@ -3,7 +3,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { createInfraction, listInfractions, updateInfraction } from '../controllers/infraction.controller';
-import { getAdminCajones, getAdminByPlate, getAdminRecaudacionHoy, getAdminQrCodes, addAdminZoneQr, updateAdminQr, updateAdminZone, getAdminVersion } from '../controllers/admin.controller';
+import { getAdminCajones, getAdminByPlate, getAdminRecaudacionHoy, getAdminQrCodes, addAdminZoneQr, updateAdminQr, updateAdminZone, getAdminVersion, getAdminReportes } from '../controllers/admin.controller';
 
 const router = Router();
 
@@ -34,6 +34,9 @@ router.get('/cajones', getAdminCajones);
 
 // GET /api/v1/admin/inspector/:placa — lookup active ticket by license plate
 router.get('/inspector/:placa', getAdminByPlate);
+
+// GET /api/v1/admin/reportes?dias=7 — recaudación por día, ocupación por hora y por zona
+router.get('/reportes', getAdminReportes);
 
 // GET /api/v1/admin/recaudacion/hoy — today's revenue stats
 router.get('/recaudacion/hoy', getAdminRecaudacionHoy);
