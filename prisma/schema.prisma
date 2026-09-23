@@ -53,8 +53,9 @@ model ParkingZone {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  spots   ParkingSpot[]
-  qrCodes ZoneQr[]
+  spots       ParkingSpot[]
+  qrCodes     ZoneQr[]
+  infractions Infraction[]
 
   @@map("parking_zones")
   @@schema("sigva")
@@ -93,8 +94,9 @@ model ParkingSpot {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
-  zone    ParkingZone    @relation(fields: [zoneId], references: [id])
-  tickets ParkingTicket[]
+  zone        ParkingZone     @relation(fields: [zoneId], references: [id])
+  tickets     ParkingTicket[]
+  infractions Infraction[]
 
   @@unique([zoneId, number])
   @@map("parking_spots")
@@ -163,6 +165,47 @@ enum PaymentMethod {
   CASH
   WALLET
   QR
+
+  @@schema("sigva")
+}
+
+// ─── Infracciones (las registra el inspector desde el dashboard SIGVA) ────────
+model Infraction {
+  id           String           @id @default(cuid())
+  number       Int              @unique @default(autoincrement()) // folio INF-000001
+  licensePlate String
+  type         InfractionType   @default(SIN_PAGO)
+  status       InfractionStatus @default(PENDIENTE)
+  amount       Float?           // monto de la multa (INFRACCION_MONTO en Railway)
+  notes        String?
+  spotId       String?
+  zoneId       String?
+  ticketId     String?          // ticket vencido relacionado, si lo hay
+  issuedBy     String?          // quién la registró (p. ej. "dashboard")
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  spot ParkingSpot? @relation(fields: [spotId], references: [id])
+  zone ParkingZone? @relation(fields: [zoneId], references: [id])
+
+  @@index([licensePlate])
+  @@index([createdAt])
+  @@map("infractions")
+  @@schema("sigva")
+}
+
+enum InfractionType {
+  SIN_PAGO
+  TIEMPO_VENCIDO
+  OTRA
+
+  @@schema("sigva")
+}
+
+enum InfractionStatus {
+  PENDIENTE
+  PAGADA
+  CANCELADA
 
   @@schema("sigva")
 }
