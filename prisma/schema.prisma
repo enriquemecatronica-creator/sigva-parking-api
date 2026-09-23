@@ -21,8 +21,11 @@ model User {
   role      Role     @default(DRIVER)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  // Placas guardadas del conductor (máximo 5) para no escribirlas en cada sesión
+  savedPlates String[] @default([])
 
   tickets   ParkingTicket[]
+  passwordResets PasswordReset[]
 
   @@map("users")
   @@schema("sigva")
@@ -147,8 +150,9 @@ model ParkingTicket {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  user  User        @relation(fields: [userId], references: [id])
-  spot  ParkingSpot @relation(fields: [spotId], references: [id])
+  user     User        @relation(fields: [userId], references: [id])
+  spot     ParkingSpot @relation(fields: [spotId], references: [id])
+  payments Payment[]
 
   @@map("parking_tickets")
   @@schema("sigva")
@@ -158,6 +162,7 @@ enum TicketStatus {
   ACTIVE
   COMPLETED
   CANCELLED
+  PENDING_PAYMENT // esperando la confirmación de Mercado Pago (el cajón queda apartado)
 
   @@schema("sigva")
 }
@@ -209,5 +214,48 @@ enum InfractionStatus {
   PAGADA
   CANCELADA
 
+  @@schema("sigva")
+}
+
+// ─── Recuperación de contraseña por código enviado al correo ─────────────────
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String    // el código nunca se guarda en claro
+  expiresAt DateTime
+  attempts  Int       @default(0)
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("password_resets")
+  @@schema("sigva")
+}
+
+// ─── Pagos (Mercado Pago) ─────────────────────────────────────────────────────
+// Un pago por inicio de sesión o por cada extensión de tiempo.
+model Payment {
+  id                String    @id @default(cuid())   // se manda a Mercado Pago como external_reference
+  ticketId          String
+  kind              String    // INICIO | EXTENSION
+  minutes           Int
+  amount            Float
+  currency          String    @default("MXN")
+  provider          String    // mercadopago | simulado
+  status            String    @default("PENDIENTE") // PENDIENTE | APROBADO | RECHAZADO | EXPIRADO | REEMBOLSADO
+  preferenceId      String?
+  checkoutUrl       String?
+  providerPaymentId String?   @unique
+  providerStatus    String?
+  approvedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  ticket ParkingTicket @relation(fields: [ticketId], references: [id])
+
+  @@index([ticketId])
+  @@map("payments")
   @@schema("sigva")
 }
