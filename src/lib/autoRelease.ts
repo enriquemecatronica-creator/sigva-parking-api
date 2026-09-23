@@ -10,6 +10,7 @@
 // inspector pueda revisar y levantar la infracción.
 
 import { prisma } from './prisma';
+import { expirePendingPayments } from '../controllers/payments.controller';
 
 export const autoReleaseConfig = {
   get minutes(): number {
@@ -83,6 +84,8 @@ export function startAutoRelease(log: (msg: string) => void = console.log): () =
     try {
       const r = await releaseExpiredTickets();
       if (r.released > 0) log(`🅿️  Liberados automáticamente ${r.released} cajón(es) con tiempo vencido`);
+      const p = await expirePendingPayments();
+      if (p > 0) log(`💳 Liberados ${p} cajón(es) apartados sin pago completado`);
     } catch (e) {
       console.error('Liberación automática falló:', e);
     } finally {
