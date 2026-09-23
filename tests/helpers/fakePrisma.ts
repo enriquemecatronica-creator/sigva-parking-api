@@ -48,7 +48,17 @@ export function createFakeDb() {
 
   const prisma: any = {
     parkingZone: {
-      findMany: async () => db.zones.map((z) => ({ ...z })),
+      findMany: async ({ include }: any = {}) =>
+        db.zones.map((z) => (include?.spots ? { ...z, spots: db.spots.filter((s) => s.zoneId === z.id).map((s) => ({ status: s.status })) } : { ...z })),
+      findUnique: async ({ where }: any) => {
+        const z = db.zones.find((x) => x.id === where.id);
+        return z ? { ...z } : null;
+      },
+      update: async ({ where, data }: any) => {
+        const z = db.zones.find((x) => x.id === where.id)!;
+        return { ...touch(Object.assign(z, data)) };
+      },
+      aggregate: async () => ({ _max: { updatedAt: maxUpdated(db.zones) } }),
     },
     parkingSpot: {
       findUnique: async ({ where, include, select }: any) => {
@@ -116,7 +126,7 @@ export function createFakeDb() {
   function seed() {
     db.zones.length = db.spots.length = db.tickets.length = db.infractions.length = 0;
     infractionNumber = 0;
-    db.zones.push({ id: 'z1', name: 'Zona Parque Benito Juarez', latitude: 17.9167, longitude: -94.0833, radiusM: 100, ratePerHour: 15, currency: 'MXN' });
+    db.zones.push(touch({ id: 'z1', name: 'Zona Parque Benito Juarez', address: 'Parque', latitude: 17.9167, longitude: -94.0833, radiusM: 100, ratePerHour: 15, currency: 'MXN', openTime: '08:00', closeTime: '20:00', isActive: true }));
     for (const n of ['A-01', 'A-02', 'A-03']) db.spots.push(touch({ id: `s-${n}`, zoneId: 'z1', number: n, status: 'FREE' }));
   }
 
