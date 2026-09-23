@@ -9,6 +9,7 @@ import rateLimit from 'express-rate-limit';
 import authRouter from './routes/auth.routes';
 import parkingRouter from './routes/parking.routes';
 import adminRouter from './routes/admin.routes';
+import downloadRouter from './routes/download.routes';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -42,6 +43,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/parking', parkingRouter);
 app.use('/api/v1/admin', adminRouter);   // Dashboard SIGVA — requiere X-Admin-Key
+app.use('/descargar', downloadRouter);    // Destino de los QR de zona (solo descarga de la app)
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((_req, res) => {
