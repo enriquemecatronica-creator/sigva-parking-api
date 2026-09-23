@@ -41,6 +41,7 @@ function ticketDto(t: any, spot: any) {
     currency: spot.zone.currency,
     licensePlate: t.licensePlate,
     qrCode: t.qrCode,
+    autoReleased: t.autoReleased ?? false,
   };
 }
 
