@@ -11,6 +11,8 @@ import {
   validateMinutes,
   zonesByDistance,
 } from '../lib/parking';
+import { paymentsConfig } from '../lib/payments';
+import { cancelPendingTicket, paymentDto, startPaidExtension, startPaidSession } from './payments.controller';
 
 type AuthReq = Request & { userId: string };
 
@@ -222,10 +224,19 @@ export async function getActiveTicket(req: AuthReq | any, res: Response, next: N
     });
 
     if (!ticket) {
+      // ¿Hay un inicio esperando el pago de Mercado Pago?
+      const pending = await prisma.parkingTicket.findFirst({
+        where: { userId: req.userId, status: 'PENDING_PAYMENT' },
+        include: { spot: { include: { zone: true } }, payments: { where: { status: 'PENDIENTE' }, orderBy: { createdAt: 'desc' }, take: 1 } },
+      });
+      if (pending) {
+        return res.json({ success: true, data: { ...ticketDto(pending, pending.spot), pago: paymentDto(pending.payments[0]) } });
+      }
       return res.json({ success: true, data: null });
     }
 
-    res.json({ success: true, data: ticketDto(ticket, ticket.spot) });
+    const extPend = await prisma.payment.findFirst({ where: { ticketId: ticket.id, status: 'PENDIENTE' }, orderBy: { createdAt: 'desc' } });
+    res.json({ success: true, data: { ...ticketDto(ticket, ticket.spot), pago: paymentDto(extPend) } });
   } catch (err) {
     next(err);
   }
@@ -235,7 +246,7 @@ export async function getActiveTicket(req: AuthReq | any, res: Response, next: N
 export async function getTicketHistory(req: AuthReq | any, res: Response, next: NextFunction) {
   try {
     const tickets = await prisma.parkingTicket.findMany({
-      where: { userId: req.userId, status: { not: 'ACTIVE' } },
+      where: { userId: req.userId, status: { in: ['COMPLETED', 'CANCELLED'] } },
       include: { spot: { include: { zone: true } } },
       orderBy: { createdAt: 'desc' },
       take: 50,
@@ -288,10 +299,33 @@ export async function createTicket(req: AuthReq | any, res: Response, next: Next
     if (activeTicket) {
       return res.status(409).json({ success: false, message: 'Ya tienes un ticket activo' });
     }
+    // Un intento anterior sin pagar se cancela (libera su cajón) al empezar uno nuevo
+    const oldPending = await prisma.parkingTicket.findFirst({ where: { userId: req.userId, status: 'PENDING_PAYMENT' } });
+    if (oldPending) await cancelPendingTicket(oldPending.id, 'EXPIRADO');
 
     const now = new Date();
     const prepaid = minutes != null;
     const amount = prepaid ? costFor(minutes!, spot.zone.ratePerHour) : null;
+
+    // Cobro real con Mercado Pago: se aparta el cajón y se regresa la liga para pagar
+    if (prepaid && paymentsConfig.provider === 'mercadopago') {
+      const user = await prisma.user.findUnique({ where: { id: req.userId }, select: { email: true } });
+      const { ticket, payment } = await startPaidSession({
+        userId: req.userId,
+        userEmail: user?.email,
+        spot,
+        plate,
+        minutes: minutes!,
+        amount: amount!,
+        gps: { lat: gps.lat, lng: gps.lng, accuracyM: gps.accuracyM, distanceM: gps.distanceM },
+        qrCode: crypto.randomUUID(),
+      });
+      return res.status(202).json({
+        success: true,
+        message: 'Paga en Mercado Pago para activar tu tiempo',
+        data: { ...ticketDto(ticket, spot), gpsWarning: gps.reason, pago: paymentDto(payment) },
+      });
+    }
 
     const ticket = await prisma.$transaction(async (tx) => {
       // Evita que dos personas tomen el mismo cajón al mismo tiempo
@@ -328,8 +362,8 @@ export async function createTicket(req: AuthReq | any, res: Response, next: Next
       data: { ...ticketDto(ticket, spot), gpsWarning: gps.reason },
     });
   } catch (err: any) {
-    if (err?.status === 409) {
-      return res.status(409).json({ success: false, message: err.message });
+    if (err?.status === 409 || err?.status === 502) {
+      return res.status(err.status).json({ success: false, message: err.message });
     }
     next(err);
   }
@@ -366,6 +400,21 @@ export async function extendTicket(req: AuthReq | any, res: Response, next: Next
 
     const base = Math.max(ticket.scheduledEnd.getTime(), Date.now());
     const extra = costFor(check.minutes, ticket.spot.zone.ratePerHour);
+
+    // Cobro real: el tiempo se suma cuando Mercado Pago confirma el pago
+    if (paymentsConfig.provider === 'mercadopago') {
+      const user = await prisma.user.findUnique({ where: { id: req.userId }, select: { email: true } });
+      try {
+        const pago = await startPaidExtension({ ticket, minutes: check.minutes, amount: extra, userEmail: user?.email });
+        return res.status(202).json({
+          success: true,
+          message: 'Paga en Mercado Pago para sumar el tiempo',
+          data: { ...ticketDto(ticket, ticket.spot), charged: extra, pago: paymentDto(pago) },
+        });
+      } catch (e: any) {
+        return res.status(e?.status ?? 502).json({ success: false, message: e.message });
+      }
+    }
     const updated = await prisma.parkingTicket.update({
       where: { id: ticket.id },
       data: {
