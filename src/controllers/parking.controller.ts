@@ -40,7 +40,7 @@ export async function getZones(req: Request, res: Response, next: NextFunction) 
 export async function getZoneById(req: Request, res: Response, next: NextFunction) {
   try {
     const zone = await prisma.parkingZone.findUnique({
-      where: { id: req.params.id },
+      where: { id: String(req.params.id) },
       include: { spots: { orderBy: { number: 'asc' } } },
     });
     if (!zone) {
@@ -213,7 +213,7 @@ export async function createTicket(req: AuthReq | any, res: Response, next: Next
 export async function closeTicket(req: AuthReq | any, res: Response, next: NextFunction) {
   try {
     const ticket = await prisma.parkingTicket.findFirst({
-      where: { id: req.params.id, userId: req.userId, status: 'ACTIVE' },
+      where: { id: String(req.params.id), userId: req.userId, status: 'ACTIVE' },
       include: { spot: { include: { zone: true } } },
     });
 
