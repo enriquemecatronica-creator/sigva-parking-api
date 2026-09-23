@@ -12,6 +12,7 @@ import parkingRouter from './routes/parking.routes';
 import adminRouter from './routes/admin.routes';
 import downloadRouter from './routes/download.routes';
 import { errorHandler } from './middleware/errorHandler';
+import { mercadoPagoWebhook, paymentReturnPage } from './controllers/payments.controller';
 
 const app = express();
 
@@ -68,6 +69,9 @@ const apiLimiter = rateLimit({
 
 app.use('/api/v1/auth/login', authLimiter);
 app.use('/api/v1/auth/register', authLimiter);
+app.use('/api/v1/auth/forgot-password', authLimiter);
+app.use('/api/v1/auth/reset-password', authLimiter);
+app.use('/api/v1/auth/change-password', authLimiter);
 app.use('/api/', apiLimiter);
 
 // ─── Parsers ──────────────────────────────────────────────────────────────────
@@ -85,6 +89,8 @@ app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/parking', parkingRouter);
 app.use('/api/v1/admin', adminRouter);   // Dashboard SIGVA — requiere X-Admin-Key
 app.use('/descargar', downloadRouter);    // Destino de los QR de zona (solo descarga de la app)
+app.post('/api/v1/pagos/webhook', mercadoPagoWebhook); // Avisos de Mercado Pago (se verifica consultando su API)
+app.get('/pagos/retorno', paymentReturnPage);         // Página al volver de Mercado Pago
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((_req, res) => {
