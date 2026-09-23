@@ -5,6 +5,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
+import jwt from 'jsonwebtoken';
 
 import authRouter from './routes/auth.routes';
 import parkingRouter from './routes/parking.routes';
@@ -26,12 +27,48 @@ app.use(cors({
 }));
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100,
+// • Dashboard SIGVA (X-Admin-Key válida): sin límite; consulta cada 30 s desde varias pestañas.
+// • App: límite por usuario (JWT), no por IP; muchos conductores comparten IP (oficina, red celular).
+// • Login/registro: límite estricto por IP contra intentos de adivinar contraseñas.
+function isAdminRequest(req: express.Request) {
+  const key = process.env.ADMIN_API_KEY;
+  return !!key && req.headers['x-admin-key'] === key;
+}
+
+function userOrIpKey(req: express.Request) {
+  const auth = req.headers.authorization;
+  if (auth?.startsWith('Bearer ') && process.env.JWT_SECRET) {
+    try {
+      const payload = jwt.verify(auth.slice(7), process.env.JWT_SECRET) as { sub?: string };
+      if (payload?.sub) return `u:${payload.sub}`;
+    } catch {
+      // token inválido o vencido → se cuenta por IP
+    }
+  }
+  return `ip:${req.ip}`;
+}
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Demasiados intentos de acceso, intenta en 15 minutos' },
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userOrIpKey,
+  skip: isAdminRequest,
   message: { success: false, message: 'Demasiadas solicitudes, intenta más tarde' },
 });
-app.use('/api/', limiter);
+
+app.use('/api/v1/auth/login', authLimiter);
+app.use('/api/v1/auth/register', authLimiter);
+app.use('/api/', apiLimiter);
 
 // ─── Parsers ──────────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10kb' }));
