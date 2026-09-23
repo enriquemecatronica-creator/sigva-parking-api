@@ -2,7 +2,7 @@
 // Admin-only routes for SIGVA dashboard integration — authenticated by X-Admin-Key header
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { getAdminCajones, getAdminByPlate, getAdminRecaudacionHoy } from '../controllers/admin.controller';
+import { getAdminCajones, getAdminByPlate, getAdminRecaudacionHoy, getAdminQrCodes, addAdminZoneQr, updateAdminQr, updateAdminZone } from '../controllers/admin.controller';
 
 const router = Router();
 
@@ -33,5 +33,17 @@ router.get('/inspector/:placa', getAdminByPlate);
 
 // GET /api/v1/admin/recaudacion/hoy — today's revenue stats
 router.get('/recaudacion/hoy', getAdminRecaudacionHoy);
+
+// GET /api/v1/admin/qr — QR de descarga de cada zona (para imprimir stickers/señales)
+router.get('/qr', getAdminQrCodes);
+
+// POST /api/v1/admin/zonas/:id/qr — agrega el segundo QR de una zona (máximo 2)
+router.post('/zonas/:id/qr', addAdminZoneQr);
+
+// PUT /api/v1/admin/qr/:code — etiqueta / dónde quedó instalado el sticker
+router.put('/qr/:code', updateAdminQr);
+
+// PUT /api/v1/admin/zonas/:id — centro y radio GPS de la zona
+router.put('/zonas/:id', updateAdminZone);
 
 export default router;
