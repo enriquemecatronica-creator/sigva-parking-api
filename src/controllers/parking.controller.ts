@@ -64,9 +64,8 @@ export async function getZones(req: Request, res: Response, next: NextFunction) 
   try {
     const zones = await prisma.parkingZone.findMany({
       where: { isActive: true },
-      include: {
-        _count: { select: { spots: { where: { status: 'FREE' } } } },
-      },
+      // Se cuentan los cajones reales; el campo fijo totalSpots de la zona puede no coincidir
+      include: { spots: { select: { status: true } } },
       orderBy: { name: 'asc' },
     });
 
@@ -77,8 +76,8 @@ export async function getZones(req: Request, res: Response, next: NextFunction) 
       latitude: z.latitude,
       longitude: z.longitude,
       radiusM: z.radiusM,
-      totalSpots: z.totalSpots,
-      freeSpots: z._count.spots,
+      totalSpots: z.spots.length,
+      freeSpots: z.spots.filter((s) => s.status === 'FREE').length,
       ratePerHour: z.ratePerHour,
       currency: z.currency,
       operatingHours: { open: z.openTime, close: z.closeTime },
@@ -109,7 +108,7 @@ export async function getZoneById(req: Request, res: Response, next: NextFunctio
         address: zone.address,
         latitude: zone.latitude,
         longitude: zone.longitude,
-        totalSpots: zone.totalSpots,
+        totalSpots: zone.spots.length,
         freeSpots,
         ratePerHour: zone.ratePerHour,
         currency: zone.currency,
