@@ -16,6 +16,10 @@ const infr = require('../src/controllers/infraction.controller') as typeof impor
 const auto = require('../src/lib/autoRelease') as typeof import('../src/lib/autoRelease');
 const admin = require('../src/controllers/admin.controller') as typeof import('../src/controllers/admin.controller');
 const reports = require('../src/lib/reports') as typeof import('../src/lib/reports');
+const account = require('../src/controllers/account.controller') as typeof import('../src/controllers/account.controller');
+const pagos = require('../src/controllers/payments.controller') as typeof import('../src/controllers/payments.controller');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const bcrypt = require('bcryptjs');
 
 const USER = 'u1';
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60000);
@@ -245,5 +249,171 @@ describe('Zonas (dashboard)', () => {
   test('la infracción guarda quién la registró desde el SIGVA', async () => {
     const res = await call(infr.createInfraction, { body: { placa: 'ABC987Z' }, headers: { 'x-sigva-user': 'manuel' } });
     assert.equal(res.body.data.registradaPor, 'sigva:manuel');
+  });
+});
+
+describe('Mi cuenta y recuperar contraseña', () => {
+  const U = 'u1';
+  let enviados: any[] = [];
+  const realFetch = globalThis.fetch;
+
+  beforeEach(async () => {
+    fake.db.users.push({ id: U, email: 'conductor@sigva.mx', name: 'Juan', phone: null, role: 'DRIVER', createdAt: new Date(), savedPlates: [], password: await bcrypt.hash('Viejo1234', 4) });
+    enviados = [];
+    process.env.RESEND_API_KEY = 're_test';
+    process.env.MAIL_FROM = 'SIGVA <no-responder@sigva.mx>';
+    (globalThis as any).fetch = async (_url: string, init: any) => { enviados.push(JSON.parse(init.body)); return { ok: true, status: 200, text: async () => '' }; };
+  });
+  const restaurar = () => { (globalThis as any).fetch = realFetch; delete process.env.RESEND_API_KEY; delete process.env.MAIL_FROM; };
+
+  test('guarda nombre, teléfono y placas (sin repetir, normalizadas)', async () => {
+    const res = await call(account.updateMe, { userId: U, body: { name: 'Juan Pérez', phone: '924 100 0000', placas: ['xyz-123-a', 'XYZ123A', 'abc 987 z'] } });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.body.user.placas, ['XYZ123A', 'ABC987Z']);
+    assert.equal(res.body.user.phone, '9241000000');
+    assert.equal((await call(account.updateMe, { userId: U, body: { placas: ['1', '2', '3', '4', '5', '6'].map((n) => 'ABC12' + n) } })).statusCode, 400);
+    restaurar();
+  });
+  test('cambiar contraseña exige la actual', async () => {
+    assert.equal((await call(account.changePassword, { userId: U, body: { actual: 'mala', nueva: 'Nueva12345' } })).statusCode, 400);
+    assert.equal((await call(account.changePassword, { userId: U, body: { actual: 'Viejo1234', nueva: 'Nueva12345' } })).statusCode, 200);
+    assert.ok(await bcrypt.compare('Nueva12345', fake.db.users[0].password));
+    restaurar();
+  });
+  test('recuperar: manda código y permite cambiar la contraseña una sola vez', async () => {
+    const r1 = await call(account.forgotPassword, { body: { email: 'CONDUCTOR@sigva.mx' } });
+    assert.equal(r1.statusCode, 200);
+    assert.equal(enviados.length, 1);
+    const codigo = String(enviados[0].text.match(/\b\d{6}\b/)[0]);
+    assert.equal((await call(account.resetPassword, { body: { email: 'conductor@sigva.mx', codigo: '000000' === codigo ? '111111' : '000000', nueva: 'Otra12345' } })).statusCode, 400);
+    const ok = await call(account.resetPassword, { body: { email: 'conductor@sigva.mx', codigo, nueva: 'Otra12345' } });
+    assert.equal(ok.statusCode, 200);
+    assert.ok(await bcrypt.compare('Otra12345', fake.db.users[0].password));
+    assert.equal((await call(account.resetPassword, { body: { email: 'conductor@sigva.mx', codigo, nueva: 'Otra99999' } })).statusCode, 400);
+    restaurar();
+  });
+  test('correo no registrado: misma respuesta y no se envía nada', async () => {
+    const r = await call(account.forgotPassword, { body: { email: 'nadie@x.mx' } });
+    assert.equal(r.statusCode, 200);
+    assert.equal(enviados.length, 0);
+    restaurar();
+  });
+  test('bloquea el código después de 5 intentos fallidos', async () => {
+    await call(account.forgotPassword, { body: { email: 'conductor@sigva.mx' } });
+    const codigo = String(enviados[0].text.match(/\b\d{6}\b/)[0]);
+    const malo = codigo === '123456' ? '654321' : '123456';
+    for (let i = 0; i < 5; i++) await call(account.resetPassword, { body: { email: 'conductor@sigva.mx', codigo: malo, nueva: 'Otra12345' } });
+    assert.equal((await call(account.resetPassword, { body: { email: 'conductor@sigva.mx', codigo, nueva: 'Otra12345' } })).statusCode, 400);
+    restaurar();
+  });
+  test('sin servicio de correo configurado responde 503', async () => {
+    restaurar();
+    assert.equal((await call(account.forgotPassword, { body: { email: 'conductor@sigva.mx' } })).statusCode, 503);
+  });
+});
+
+describe('Mercado Pago (listo para conectar)', () => {
+  const realFetch = globalThis.fetch;
+  let mpPago: any = null;
+  let reembolsos: string[] = [];
+  let preferencias: any[] = [];
+
+  beforeEach(() => {
+    process.env.PAYMENT_PROVIDER = 'mercadopago';
+    process.env.MP_ACCESS_TOKEN = 'TEST-token';
+    process.env.PUBLIC_API_URL = 'https://api.test';
+    delete process.env.MP_WEBHOOK_SECRET;
+    mpPago = null; reembolsos = []; preferencias = [];
+    fake.db.users.push({ id: USER, email: 'conductor@sigva.mx', name: 'Juan', role: 'DRIVER', savedPlates: [], password: 'x' });
+    (globalThis as any).fetch = async (url: string, init: any = {}) => {
+      const json = (d: any) => ({ ok: true, status: 200, text: async () => JSON.stringify(d) });
+      if (url.endsWith('/checkout/preferences')) { preferencias.push(JSON.parse(init.body)); return json({ id: 'pref-1', init_point: 'https://mp.test/pagar' }); }
+      if (url.includes('/refunds')) { reembolsos.push(url); return json({ id: 1 }); }
+      if (url.includes('/v1/payments/')) return json(mpPago);
+      throw new Error('URL inesperada ' + url);
+    };
+  });
+  const fin = () => { (globalThis as any).fetch = realFetch; delete process.env.PAYMENT_PROVIDER; delete process.env.MP_ACCESS_TOKEN; delete process.env.PUBLIC_API_URL; };
+  const iniciar = () => call(parking.createTicket, { body: { spotId: 's-A-01', licensePlate: 'XYZ123A', minutes: 45 }, userId: USER });
+  const avisar = (id = '777', headers: any = {}) => call(pagos.mercadoPagoWebhook, { body: { type: 'payment', data: { id } }, query: {}, headers });
+
+  test('iniciar aparta el cajón y regresa la liga de pago', async () => {
+    const r = await iniciar();
+    assert.equal(r.statusCode, 202);
+    assert.equal(r.body.data.status, 'pending_payment');
+    assert.equal(r.body.data.pago.checkoutUrl, 'https://mp.test/pagar');
+    assert.equal(fake.db.spots.find((s) => s.id === 's-A-01')!.status, 'RESERVED');
+    assert.equal(preferencias[0].items[0].unit_price, 11.25);
+    assert.equal(preferencias[0].notification_url, 'https://api.test/api/v1/pagos/webhook');
+    fin();
+  });
+  test('pago aprobado activa la sesión y ocupa el cajón (una sola vez)', async () => {
+    const r = await iniciar();
+    mpPago = { id: 777, status: 'approved', external_reference: r.body.data.pago.id, transaction_amount: 11.25, payment_type_id: 'credit_card' };
+    assert.equal((await avisar()).body.resultado, 'activado');
+    const t = fake.db.tickets[0];
+    assert.equal(t.status, 'ACTIVE');
+    assert.equal(t.amountPaid, 11.25);
+    assert.equal(t.paymentMethod, 'CARD');
+    assert.ok(t.scheduledEnd > new Date());
+    assert.equal(fake.db.spots.find((s) => s.id === 's-A-01')!.status, 'OCCUPIED');
+    assert.equal((await avisar()).body.resultado, 'ya_procesado');
+    fin();
+  });
+  test('pago rechazado libera el cajón', async () => {
+    const r = await iniciar();
+    mpPago = { id: 778, status: 'rejected', external_reference: r.body.data.pago.id, transaction_amount: 11.25 };
+    assert.equal((await avisar('778')).body.resultado, 'rechazado');
+    assert.equal(fake.db.tickets[0].status, 'CANCELLED');
+    assert.equal(fake.db.spots.find((s) => s.id === 's-A-01')!.status, 'FREE');
+    fin();
+  });
+  test('si pagó tarde (cajón ya liberado) se reembolsa solo', async () => {
+    const r = await iniciar();
+    fake.db.tickets[0].createdAt = minutesAgo(20);
+    assert.equal(await pagos.expirePendingPayments(), 1);
+    assert.equal(fake.db.spots.find((s) => s.id === 's-A-01')!.status, 'FREE');
+    mpPago = { id: 779, status: 'approved', external_reference: r.body.data.pago.id, transaction_amount: 11.25, payment_type_id: 'ticket' };
+    assert.equal((await avisar('779')).body.resultado, 'reembolsado');
+    assert.equal(reembolsos.length, 1);
+    fin();
+  });
+  test('monto menor al esperado no activa y se reembolsa', async () => {
+    const r = await iniciar();
+    mpPago = { id: 780, status: 'approved', external_reference: r.body.data.pago.id, transaction_amount: 1, payment_type_id: 'credit_card' };
+    assert.equal((await avisar('780')).body.resultado, 'monto_incorrecto');
+    assert.equal(fake.db.tickets[0].status, 'PENDING_PAYMENT');
+    fin();
+  });
+  test('extender con pago suma el tiempo al aprobarse', async () => {
+    const r = await iniciar();
+    mpPago = { id: 781, status: 'approved', external_reference: r.body.data.pago.id, transaction_amount: 11.25, payment_type_id: 'credit_card' };
+    await avisar('781');
+    const ext = await call(parking.extendTicket, { params: { id: fake.db.tickets[0].id }, body: { minutes: 15 }, userId: USER });
+    assert.equal(ext.statusCode, 202);
+    assert.equal(fake.db.tickets[0].plannedMinutes, 45); // todavía no se suma
+    mpPago = { id: 782, status: 'approved', external_reference: ext.body.data.pago.id, transaction_amount: 3.75, payment_type_id: 'account_money' };
+    assert.equal((await avisar('782')).body.resultado, 'extendido');
+    assert.equal(fake.db.tickets[0].plannedMinutes, 60);
+    assert.equal(fake.db.tickets[0].amountPaid, 15);
+    fin();
+  });
+  test('firma de Mercado Pago inválida se rechaza', async () => {
+    process.env.MP_WEBHOOK_SECRET = 'secreto';
+    await iniciar();
+    assert.equal((await avisar('783', { 'x-signature': 'ts=1,v1=malo', 'x-request-id': 'r1' })).statusCode, 401);
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const crypto = require('crypto');
+    const v1 = crypto.createHmac('sha256', 'secreto').update('id:783;request-id:r1;ts:1;').digest('hex');
+    mpPago = { id: 783, status: 'pending', external_reference: fake.db.payments[0].id, transaction_amount: 11.25 };
+    assert.equal((await avisar('783', { 'x-signature': `ts=1,v1=${v1}`, 'x-request-id': 'r1' })).statusCode, 200);
+    delete process.env.MP_WEBHOOK_SECRET;
+    fin();
+  });
+  test('sin Mercado Pago configurado todo sigue con pago simulado', async () => {
+    fin();
+    const r = await iniciar();
+    assert.equal(r.statusCode, 201);
+    assert.equal(r.body.data.status, 'active');
   });
 });
