@@ -10,7 +10,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:push": "prisma db push",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "test": "tsc -p tsconfig.test.json && node --test dist-test/tests/*.test.js"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
