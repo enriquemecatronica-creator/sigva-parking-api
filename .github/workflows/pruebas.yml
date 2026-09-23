@@ -1,0 +1,28 @@
+# Corre las pruebas automáticas del parquímetro en cada cambio que se publique.
+# No toca la base de datos de producción (usa una base simulada) ni cuesta nada.
+name: Pruebas
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Generar cliente de Prisma
+        run: npx prisma generate
+      - name: Revisar tipos (TypeScript)
+        run: npx tsc --noEmit
+      - name: Pruebas
+        run: npm test
