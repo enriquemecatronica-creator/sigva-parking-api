@@ -4,6 +4,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../lib/prisma';
 import { MAX_QR_PER_ZONE, downloadUrlFor, addSecondZoneQr, normalizeQrCode, remainingMinutes } from '../lib/parking';
+import { autoReleaseConfig, minutesUntilRelease } from '../lib/autoRelease';
 
 // ─── GET /admin/cajones ───────────────────────────────────────────────────────
 // Returns all spots with real-time status for the Parquímetro module in SIGVA
@@ -62,6 +63,8 @@ export async function getAdminCajones(req: Request, res: Response, next: NextFun
         minutosEstacionado,
         minutosRestantes,
         vencido,
+        // Vencidos: minutos antes de que el sistema libere el cajón solo (null si no aplica)
+        minutosParaLiberar: vencido ? minutesUntilRelease(minutosRestantes) : null,
       };
     });
 
@@ -284,6 +287,28 @@ export async function updateAdminZone(req: Request, res: Response, next: NextFun
     }
     const updated = await prisma.parkingZone.update({ where: { id: zone.id }, data });
     res.json({ success: true, data: { id: updated.id, zona: updated.name, latitud: updated.latitude, longitud: updated.longitude, radioM: updated.radiusM } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ─── GET /admin/version ───────────────────────────────────────────────────────
+// Consulta muy ligera para el dashboard: cambia cada vez que se mueve un cajón, un ticket
+// o una infracción. El dashboard la pregunta cada pocos segundos y solo recarga si cambió.
+export async function getAdminVersion(_req: Request, res: Response, next: NextFunction) {
+  try {
+    const [spots, tickets, infractions, activos] = await Promise.all([
+      prisma.parkingSpot.aggregate({ _max: { updatedAt: true } }),
+      prisma.parkingTicket.aggregate({ _max: { updatedAt: true } }),
+      prisma.infraction.aggregate({ _max: { updatedAt: true } }),
+      prisma.parkingTicket.count({ where: { status: 'ACTIVE' } }),
+    ]);
+    const ms = (d: Date | null | undefined) => (d ? d.getTime() : 0);
+    const version = [ms(spots._max.updatedAt), ms(tickets._max.updatedAt), ms(infractions._max.updatedAt), activos].join('-');
+    res.json({
+      success: true,
+      data: { version, activos, liberacionAutomaticaMin: autoReleaseConfig.minutes, timestamp: new Date().toISOString() },
+    });
   } catch (err) {
     next(err);
   }
