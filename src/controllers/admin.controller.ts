@@ -5,6 +5,7 @@ import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../lib/prisma';
 import { MAX_QR_PER_ZONE, downloadUrlFor, addSecondZoneQr, normalizeQrCode, remainingMinutes } from '../lib/parking';
 import { autoReleaseConfig, minutesUntilRelease } from '../lib/autoRelease';
+import { buildReport, dayKey, hourOf, startOfDayLocal } from '../lib/reports';
 
 // ─── GET /admin/cajones ───────────────────────────────────────────────────────
 // Returns all spots with real-time status for the Parquímetro module in SIGVA
@@ -130,8 +131,8 @@ export async function getAdminByPlate(req: Request, res: Response, next: NextFun
 // Returns today's revenue breakdown for the SIGVA dashboard
 export async function getAdminRecaudacionHoy(req: Request, res: Response, next: NextFunction) {
   try {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    // Medianoche de hoy en hora de México (el servidor corre en UTC)
+    const todayStart = startOfDayLocal();
 
     const tickets = await prisma.parkingTicket.findMany({
       where: {
@@ -166,7 +167,7 @@ export async function getAdminRecaudacionHoy(req: Request, res: Response, next: 
     const porZona = Object.entries(zonaMap).map(([zona, monto]) => ({ zona, monto }));
 
     // Monthly projection (30-day simple estimate based on today)
-    const hourOfDay = new Date().getHours() || 1;
+    const hourOfDay = hourOf(new Date()) || 1; // hora de México
     const proyeccionDiaria = hourOfDay >= 8 ? (total / (hourOfDay - 7)) * 12 : total; // operating 8am-8pm
     const proyeccionMensual = parseFloat((proyeccionDiaria * 26).toFixed(2)); // 26 business days
 
@@ -181,7 +182,7 @@ export async function getAdminRecaudacionHoy(req: Request, res: Response, next: 
         porZona,
         proyeccionMensual,
         currency: 'MXN',
-        fecha: todayStart.toISOString().split('T')[0],
+        fecha: dayKey(new Date()),
       },
     });
   } catch (err) {
@@ -309,6 +310,47 @@ export async function getAdminVersion(_req: Request, res: Response, next: NextFu
       success: true,
       data: { version, activos, liberacionAutomaticaMin: autoReleaseConfig.minutes, timestamp: new Date().toISOString() },
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ─── GET /admin/reportes?dias=7 ───────────────────────────────────────────────
+// Recaudación y sesiones por día, ocupación promedio por hora del día y resumen por zona.
+// dias: 1 a 90 (7 por defecto). Fechas y horas en hora de México.
+export async function getAdminReportes(req: Request, res: Response, next: NextFunction) {
+  try {
+    const dias = Math.min(90, Math.max(1, Math.floor(Number(req.query.dias) || 7)));
+    const now = new Date();
+    const from = new Date(startOfDayLocal(now).getTime() - (dias - 1) * 86400000);
+
+    const [tickets, zones, infractions] = await Promise.all([
+      prisma.parkingTicket.findMany({
+        where: {
+          status: { in: ['ACTIVE', 'COMPLETED'] },
+          OR: [{ entryTime: { gte: from } }, { exitTime: { gte: from } }, { status: 'ACTIVE' }],
+        },
+        select: {
+          entryTime: true, exitTime: true, scheduledEnd: true, status: true,
+          amountPaid: true, autoReleased: true, spot: { select: { zoneId: true } },
+        },
+      }),
+      prisma.parkingZone.findMany({ where: { isActive: true }, select: { id: true, name: true, _count: { select: { spots: true } } } }),
+      prisma.infraction.findMany({
+        where: { createdAt: { gte: from }, status: { not: 'CANCELADA' } },
+        select: { createdAt: true, amount: true, status: true },
+      }),
+    ]);
+
+    // La recaudación y las sesiones cuentan por día de entrada; la ocupación, por el tiempo en el periodo
+    const report = buildReport(
+      tickets.map((t) => ({ ...t, zoneId: t.spot.zoneId })),
+      zones.map((z) => ({ id: z.id, name: z.name, spots: z._count.spots })),
+      infractions,
+      dias,
+      now,
+    );
+    res.json({ success: true, data: report });
   } catch (err) {
     next(err);
   }
