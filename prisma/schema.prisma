@@ -49,12 +49,35 @@ model ParkingZone {
   openTime       String   @default("08:00")
   closeTime      String   @default("22:00")
   isActive       Boolean  @default(true)
+  radiusM        Int      @default(100) // radio (m) alrededor de la zona donde el GPS del teléfono se acepta
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  spots ParkingSpot[]
+  spots   ParkingSpot[]
+  qrCodes ZoneQr[]
 
   @@map("parking_zones")
+  @@schema("sigva")
+}
+
+// ─── QR de zona (1 o máximo 2 por zona) ───────────────────────────────────────
+// Sticker/señal en la calle cuyo único fin es DESCARGAR la app. Apunta a
+// {API}/descargar?zona={code}; la sesión de estacionamiento NO escanea QR:
+// la zona se determina por el GPS del teléfono.
+model ZoneQr {
+  id        String   @id @default(cuid())
+  code      String   @unique // e.g. "MTY01A"
+  zoneId    String
+  label     String?  // e.g. "Esquina norte"
+  latitude  Float?   // dónde quedó instalado (informativo)
+  longitude Float?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  zone ParkingZone @relation(fields: [zoneId], references: [id])
+
+  @@map("zone_qr_codes")
   @@schema("sigva")
 }
 
@@ -109,6 +132,14 @@ model ParkingTicket {
   amountPaid      Float?
   paymentMethod   PaymentMethod?
   qrCode          String?        @unique
+  // Sesión con tiempo elegido (F4): minutos contratados y hora de vencimiento
+  plannedMinutes  Int?
+  scheduledEnd    DateTime?
+  // Ubicación del teléfono al iniciar la sesión (validación GPS por zona)
+  gpsLat          Float?
+  gpsLng          Float?
+  gpsAccuracy     Float?
+  gpsDistanceM    Float?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
