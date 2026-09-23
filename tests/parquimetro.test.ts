@@ -15,6 +15,7 @@ const parking = require('../src/controllers/parking.controller') as typeof impor
 const infr = require('../src/controllers/infraction.controller') as typeof import('../src/controllers/infraction.controller');
 const auto = require('../src/lib/autoRelease') as typeof import('../src/lib/autoRelease');
 const admin = require('../src/controllers/admin.controller') as typeof import('../src/controllers/admin.controller');
+const reports = require('../src/lib/reports') as typeof import('../src/lib/reports');
 
 const USER = 'u1';
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60000);
@@ -187,5 +188,31 @@ describe('Dashboard', () => {
     await call(parking.createTicket, { body: { spotId: 's-A-03', licensePlate: 'XYZ123A', minutes: 15 }, userId: USER });
     const v2 = (await call(admin.getAdminVersion, {})).body.data.version;
     assert.notEqual(v1, v2);
+  });
+});
+
+describe('Reportes (hora de México)', () => {
+  test('el día y la hora se toman en hora de México, no en UTC', () => {
+    assert.equal(reports.dayKey(new Date('2026-09-23T05:00:00Z')), '2026-09-22'); // 23:00 del 22 en México
+    assert.equal(reports.hourOf(new Date('2026-09-23T16:30:00Z')), 10);
+    assert.equal(reports.startOfDayLocal(new Date('2026-09-23T20:00:00Z')).toISOString(), '2026-09-23T06:00:00.000Z');
+  });
+  test('recaudación por día y ocupación por hora', () => {
+    const now = new Date('2026-09-23T23:00:00Z'); // 17:00 en México
+    const tickets = [
+      // 10:00 a 11:30 (México), pagó $22.50
+      { entryTime: new Date('2026-09-23T16:00:00Z'), exitTime: new Date('2026-09-23T17:30:00Z'), scheduledEnd: null, status: 'COMPLETED', amountPaid: 22.5, autoReleased: false, zoneId: 'z1' },
+      // ayer 12:00 a 12:15, liberado automáticamente
+      { entryTime: new Date('2026-09-22T18:00:00Z'), exitTime: new Date('2026-09-22T18:15:00Z'), scheduledEnd: null, status: 'COMPLETED', amountPaid: 3.75, autoReleased: true, zoneId: 'z1' },
+    ];
+    const r = reports.buildReport(tickets, [{ id: 'z1', name: 'Zona Parque', spots: 10 }], [{ createdAt: new Date('2026-09-23T18:00:00Z'), amount: 250, status: 'PENDIENTE' }], 2, now);
+    assert.deepEqual(r.porDia.map((d) => [d.fecha, d.recaudacion, d.sesiones, d.infracciones]), [['2026-09-22', 3.75, 1, 0], ['2026-09-23', 22.5, 1, 1]]);
+    assert.equal(r.resumen.recaudacion, 26.25);
+    assert.equal(r.resumen.liberadasAutomaticamente, 1);
+    assert.equal(r.resumen.duracionPromedioMin, 53); // (90 + 15) / 2
+    assert.equal(r.ocupacionPorHora[10].cajonesPromedio, 0.5); // 60 min / (60 × 2 días)
+    assert.equal(r.ocupacionPorHora[11].cajonesPromedio, 0.25);
+    assert.equal(r.ocupacionPorHora[12].cajonesPromedio, 0.13); // 15 min / 120
+    assert.equal(r.porZona[0].sesiones, 2);
   });
 });
