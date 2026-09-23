@@ -216,3 +216,34 @@ describe('Reportes (hora de México)', () => {
     assert.equal(r.porZona[0].sesiones, 2);
   });
 });
+
+describe('Zonas (dashboard)', () => {
+  const editar = (body: any) => call(admin.updateAdminZone, { params: { id: 'z1' }, body });
+
+  test('lista zonas con tarifa, horario y cajones libres', async () => {
+    const res = await call(admin.getAdminZonas, {});
+    const z = res.body.data[0];
+    assert.equal(z.tarifaHora, 15);
+    assert.equal(z.horaApertura, '08:00');
+    assert.equal(z.cajones, 3);
+    assert.equal(z.libres, 3);
+  });
+  test('cambia tarifa, horario y ubicación', async () => {
+    const res = await editar({ tarifaHora: 12.5, horaApertura: '07:30', horaCierre: '21:00', latitud: 17.91, longitud: -94.09, radioM: 150 });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual([res.body.data.tarifaHora, res.body.data.horaApertura, res.body.data.horaCierre, res.body.data.radioM], [12.5, '07:30', '21:00', 150]);
+    // El costo de una sesión nueva usa la tarifa nueva
+    const t = await call(parking.createTicket, { body: { spotId: 's-A-01', licensePlate: 'XYZ123A', minutes: 60 }, userId: USER });
+    assert.equal(t.body.data.amountPaid, 12.5);
+  });
+  test('rechaza datos inválidos', async () => {
+    assert.equal((await editar({ tarifaHora: -1 })).statusCode, 400);
+    assert.equal((await editar({ horaApertura: '25:00' })).statusCode, 400);
+    assert.equal((await editar({ radioM: 5 })).statusCode, 400);
+    assert.equal((await editar({})).statusCode, 400);
+  });
+  test('la infracción guarda quién la registró desde el SIGVA', async () => {
+    const res = await call(infr.createInfraction, { body: { placa: 'ABC987Z' }, headers: { 'x-sigva-user': 'manuel' } });
+    assert.equal(res.body.data.registradaPor, 'sigva:manuel');
+  });
+});
