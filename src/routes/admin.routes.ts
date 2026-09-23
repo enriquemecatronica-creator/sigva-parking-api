@@ -3,7 +3,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { createInfraction, listInfractions, updateInfraction } from '../controllers/infraction.controller';
-import { getAdminCajones, getAdminByPlate, getAdminRecaudacionHoy, getAdminQrCodes, addAdminZoneQr, updateAdminQr, updateAdminZone, getAdminVersion, getAdminReportes } from '../controllers/admin.controller';
+import { getAdminCajones, getAdminByPlate, getAdminRecaudacionHoy, getAdminQrCodes, addAdminZoneQr, updateAdminQr, updateAdminZone, getAdminVersion, getAdminReportes, getAdminZonas } from '../controllers/admin.controller';
 
 const router = Router();
 
@@ -49,6 +49,9 @@ router.post('/zonas/:id/qr', addAdminZoneQr);
 
 // PUT /api/v1/admin/qr/:code — etiqueta / dónde quedó instalado el sticker
 router.put('/qr/:code', updateAdminQr);
+
+// GET /api/v1/admin/zonas — zonas con tarifa, horario, ubicación y cajones
+router.get('/zonas', getAdminZonas);
 
 // PUT /api/v1/admin/zonas/:id — centro y radio GPS de la zona
 router.put('/zonas/:id', updateAdminZone);
