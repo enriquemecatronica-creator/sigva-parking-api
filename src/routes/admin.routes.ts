@@ -3,7 +3,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { createInfraction, listInfractions, updateInfraction } from '../controllers/infraction.controller';
-import { getAdminCajones, getAdminByPlate, getAdminRecaudacionHoy, getAdminQrCodes, addAdminZoneQr, updateAdminQr, updateAdminZone } from '../controllers/admin.controller';
+import { getAdminCajones, getAdminByPlate, getAdminRecaudacionHoy, getAdminQrCodes, addAdminZoneQr, updateAdminQr, updateAdminZone, getAdminVersion } from '../controllers/admin.controller';
 
 const router = Router();
 
@@ -25,6 +25,9 @@ function requireAdminKey(req: Request, res: Response, next: NextFunction) {
 }
 
 router.use(requireAdminKey);
+
+// GET /api/v1/admin/version — señal ligera de cambios (el dashboard recarga solo si cambió)
+router.get('/version', getAdminVersion);
 
 // GET /api/v1/admin/cajones — all spots with real-time status
 router.get('/cajones', getAdminCajones);
