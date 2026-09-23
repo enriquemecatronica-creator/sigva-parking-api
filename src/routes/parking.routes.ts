@@ -14,6 +14,7 @@ import {
   verifyLocation,
   getParkingConfig,
 } from '../controllers/parking.controller';
+import { getPaymentStatus, cancelPendingByUser } from '../controllers/payments.controller';
 
 const router = Router();
 
@@ -46,6 +47,12 @@ router.get('/tickets/history', getTicketHistory);
 
 // POST /api/v1/parking/tickets
 router.post('/tickets', createTicket);
+
+// GET /api/v1/parking/pagos/:id — estado de un pago de Mercado Pago
+router.get('/pagos/:id', getPaymentStatus);
+
+// POST /api/v1/parking/tickets/:id/cancelar — abandonar un pago pendiente (libera el cajón)
+router.post('/tickets/:id/cancelar', cancelPendingByUser);
 
 // POST /api/v1/parking/tickets/:id/close
 router.post('/tickets/:id/close', closeTicket);
