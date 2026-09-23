@@ -14,6 +14,10 @@ import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
 
+// Railway pone un proxy delante: sin esto todos los usuarios comparten el mismo
+// límite de solicitudes (misma IP) y req.protocol sale 'http' en vez de 'https'.
+app.set('trust proxy', 1);
+
 // ─── Seguridad ────────────────────────────────────────────────────────────────
 app.use(helmet());
 app.use(cors({
