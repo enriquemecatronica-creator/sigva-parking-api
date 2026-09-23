@@ -100,7 +100,8 @@ export async function createInfraction(req: Request, res: Response, next: NextFu
         spotId: spot?.id ?? null,
         zoneId: spot?.zoneId ?? null,
         ticketId: active?.id ?? null,
-        issuedBy: 'dashboard',
+        // Usuario del SIGVA que la registró (lo manda el puente /parking-proxy)
+        issuedBy: typeof req.headers?.['x-sigva-user'] === 'string' ? `sigva:${String(req.headers['x-sigva-user']).slice(0, 80)}` : 'dashboard',
       },
       include: { spot: true, zone: true },
     });
