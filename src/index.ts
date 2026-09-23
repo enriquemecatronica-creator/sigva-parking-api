@@ -3,6 +3,7 @@
 import 'dotenv/config';
 import app from './app';
 import { ensureZoneQrCodes } from './lib/parking';
+import { autoReleaseConfig, startAutoRelease } from './lib/autoRelease';
 
 const PORT = process.env.PORT ?? 3000;
 
@@ -14,4 +15,10 @@ app.listen(PORT, () => {
   ensureZoneQrCodes()
     .then((n) => n > 0 && console.log(`🏷️  QR creados para ${n} zonas`))
     .catch((e) => console.error('No se pudieron asignar códigos QR:', e));
+
+  // Libera cajones con tiempo vencido hace más de AUTO_RELEASE_MINUTES (0 = apagado)
+  if (autoReleaseConfig.minutes > 0) {
+    startAutoRelease();
+    console.log(`⏱️  Liberación automática: ${autoReleaseConfig.minutes} min después del vencimiento`);
+  }
 });
