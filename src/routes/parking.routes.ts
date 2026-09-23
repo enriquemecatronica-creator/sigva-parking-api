@@ -9,12 +9,28 @@ import {
   getTicketHistory,
   createTicket,
   closeTicket,
+  extendTicket,
+  getNearbyZones,
+  verifyLocation,
+  getParkingConfig,
 } from '../controllers/parking.controller';
 
 const router = Router();
 
 // Todas las rutas de parking requieren autenticación
 router.use(authenticate);
+
+// GET /api/v1/parking/config — reglas de tiempo y GPS para la app
+router.get('/config', getParkingConfig);
+
+// GET /api/v1/parking/zonas-cercanas?lat=&lng=&accuracy= — zona actual por GPS
+router.get('/zonas-cercanas', getNearbyZones);
+
+// POST /api/v1/parking/verificar-ubicacion — GPS vs zona (Haversine + radio)
+router.post('/verificar-ubicacion', verifyLocation);
+
+// POST /api/v1/parking/tickets/:id/extend — agregar tiempo a la sesión
+router.post('/tickets/:id/extend', extendTicket);
 
 // GET /api/v1/parking/zones
 router.get('/zones', getZones);
