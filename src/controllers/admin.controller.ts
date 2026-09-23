@@ -48,6 +48,8 @@ export async function getAdminCajones(req: Request, res: Response, next: NextFun
 
       return {
         id: spot.number,
+        spotId: spot.id,
+        zoneId: spot.zoneId,
         zona: spot.zone.name,
         estado,
         placa: activeTicket?.licensePlate ?? null,
