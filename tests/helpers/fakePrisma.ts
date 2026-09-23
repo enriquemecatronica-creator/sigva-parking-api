@@ -11,6 +11,9 @@ const newId = (p: string) => `${p}_${++seq}`;
 function matchValue(v: any, cond: any): boolean {
   if (cond !== null && typeof cond === 'object' && !(cond instanceof Date)) {
     if ('not' in cond) return !matchValue(v, cond.not);
+    if ('equals' in cond) {
+      return cond.mode === 'insensitive' ? String(v).toLowerCase() === String(cond.equals).toLowerCase() : v === cond.equals;
+    }
     if ('lt' in cond && !(v != null && v < cond.lt)) return false;
     if ('lte' in cond && !(v != null && v <= cond.lte)) return false;
     if ('gt' in cond && !(v != null && v > cond.gt)) return false;
@@ -33,14 +36,25 @@ export function createFakeDb() {
     tickets: [] as Row[],
     infractions: [] as Row[],
     users: [] as Row[],
+    resets: [] as Row[],
+    payments: [] as Row[],
   };
   let infractionNumber = 0;
 
   const zoneOf = (spot: Row) => db.zones.find((z) => z.id === spot.zoneId);
   const withSpot = (t: Row, include: any) => {
-    if (!include?.spot) return { ...t };
-    const spot = db.spots.find((s) => s.id === t.spotId)!;
-    return { ...t, spot: { ...spot, zone: zoneOf(spot) } };
+    const out: Row = { ...t };
+    if (include?.spot) {
+      const spot = db.spots.find((s) => s.id === t.spotId)!;
+      out.spot = { ...spot, zone: zoneOf(spot) };
+    }
+    if (include?.payments) {
+      out.payments = db.payments
+        .filter((p) => p.ticketId === t.id && matches(p, include.payments.where))
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, include.payments.take ?? 99);
+    }
+    return out;
   };
   const touch = (row: Row) => { row.updatedAt = new Date(); return row; };
   const maxUpdated = (rows: Row[]) =>
@@ -120,11 +134,72 @@ export function createFakeDb() {
       },
       aggregate: async () => ({ _max: { updatedAt: maxUpdated(db.infractions) } }),
     },
+    user: {
+      findUnique: async ({ where, select }: any) => {
+        const u = db.users.find((x) => (where.id ? x.id === where.id : x.email === where.email));
+        if (!u) return null;
+        return select ? Object.fromEntries(Object.keys(select).map((k) => [k, u[k]])) : { ...u };
+      },
+      findFirst: async ({ where }: any) => {
+        const u = db.users.find((x) => matches(x, where));
+        return u ? { ...u } : null;
+      },
+      update: async ({ where, data, select }: any) => {
+        const u = db.users.find((x) => x.id === where.id)!;
+        touch(Object.assign(u, data));
+        return select ? Object.fromEntries(Object.keys(select).map((k) => [k, u[k]])) : { ...u };
+      },
+    },
+    payment: {
+      create: async ({ data }: any) => {
+        const p = touch({ id: newId('pay'), status: 'PENDIENTE', currency: 'MXN', createdAt: new Date(), ...data });
+        db.payments.push(p);
+        return { ...p };
+      },
+      findUnique: async ({ where, include }: any) => {
+        const p = db.payments.find((x) => x.id === where.id);
+        if (!p) return null;
+        return include?.ticket ? { ...p, ticket: { ...db.tickets.find((t) => t.id === p.ticketId) } } : { ...p };
+      },
+      findFirst: async ({ where }: any) => {
+        const rows = db.payments.filter((x) => matches(x, where)).sort((a, b) => b.createdAt - a.createdAt);
+        return rows[0] ? { ...rows[0] } : null;
+      },
+      update: async ({ where, data }: any) => {
+        const p = db.payments.find((x) => x.id === where.id)!;
+        return { ...touch(Object.assign(p, data)) };
+      },
+      updateMany: async ({ where, data }: any) => {
+        const rows = db.payments.filter((x) => matches(x, where));
+        rows.forEach((r) => touch(Object.assign(r, data)));
+        return { count: rows.length };
+      },
+    },
+    passwordReset: {
+      create: async ({ data }: any) => {
+        const r = { id: newId('pr'), attempts: 0, usedAt: null, createdAt: new Date(), ...data };
+        db.resets.push(r);
+        return { ...r };
+      },
+      findFirst: async ({ where }: any) => {
+        const rows = db.resets.filter((x) => matches(x, where)).sort((a, b) => b.createdAt - a.createdAt);
+        return rows[0] ? { ...rows[0] } : null;
+      },
+      update: async ({ where, data }: any) => {
+        const r = db.resets.find((x) => x.id === where.id)!;
+        return { ...Object.assign(r, data) };
+      },
+      updateMany: async ({ where, data }: any) => {
+        const rows = db.resets.filter((x) => matches(x, where));
+        rows.forEach((r) => Object.assign(r, data));
+        return { count: rows.length };
+      },
+    },
     $transaction: async (fn: any) => fn(prisma),
   };
 
   function seed() {
-    db.zones.length = db.spots.length = db.tickets.length = db.infractions.length = 0;
+    db.zones.length = db.spots.length = db.tickets.length = db.infractions.length = db.users.length = db.resets.length = db.payments.length = 0;
     infractionNumber = 0;
     db.zones.push(touch({ id: 'z1', name: 'Zona Parque Benito Juarez', address: 'Parque', latitude: 17.9167, longitude: -94.0833, radiusM: 100, ratePerHour: 15, currency: 'MXN', openTime: '08:00', closeTime: '20:00', isActive: true }));
     for (const n of ['A-01', 'A-02', 'A-03']) db.spots.push(touch({ id: `s-${n}`, zoneId: 'z1', number: n, status: 'FREE' }));
