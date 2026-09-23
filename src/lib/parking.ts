@@ -9,7 +9,8 @@ import { prisma } from './prisma';
 // GPS_MAX_ACCURACY_M=20        → precisión mínima exigida al GPS del teléfono
 // (el radio aceptado de cada zona está en parking_zones.radiusM, 100 m por defecto)
 // APP_DOWNLOAD_ANDROID_URL / APP_DOWNLOAD_IOS_URL → tiendas a las que redirige el QR
-// PARKING_MIN_MINUTES=30 / PARKING_MAX_MINUTES=120 / PARKING_STEP_MINUTES=30
+// PARKING_MIN_MINUTES=15 / PARKING_MAX_MINUTES=120 / PARKING_STEP_MINUTES=15
+// (se paga en bloques de 15 min: 15, 30, 45, 1 h ... hasta 2 h; tarifa por zona en parking_zones.ratePerHour)
 function num(name: string, fallback: number): number {
   const v = Number(process.env[name]);
   return Number.isFinite(v) && v > 0 ? v : fallback;
@@ -20,9 +21,9 @@ export const parkingConfig = {
     return String(process.env.GPS_VALIDATION_ENABLED ?? '').toLowerCase() === 'true';
   },
   get maxAccuracyM() { return num('GPS_MAX_ACCURACY_M', 20); },
-  get minMinutes() { return num('PARKING_MIN_MINUTES', 30); },
+  get minMinutes() { return num('PARKING_MIN_MINUTES', 15); },
   get maxMinutes() { return num('PARKING_MAX_MINUTES', 120); },
-  get stepMinutes() { return num('PARKING_STEP_MINUTES', 30); },
+  get stepMinutes() { return num('PARKING_STEP_MINUTES', 15); },
 };
 
 // ─── Distancia Haversine en metros ───────────────────────────────────────────
