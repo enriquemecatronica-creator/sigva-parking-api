@@ -66,7 +66,7 @@ export async function getAdminCajones(req: Request, res: Response, next: NextFun
 // Returns active ticket info for a given license plate (inspector tab)
 export async function getAdminByPlate(req: Request, res: Response, next: NextFunction) {
   try {
-    const placa = req.params.placa.toUpperCase().replace(/\s/g, '');
+    const placa = String(req.params.placa).toUpperCase().replace(/\s/g, '');
 
     const ticket = await prisma.parkingTicket.findFirst({
       where: { licensePlate: placa, status: 'ACTIVE' },
@@ -133,10 +133,10 @@ export async function getAdminRecaudacionHoy(req: Request, res: Response, next: 
       .filter((t) => t.paymentMethod === 'CARD')
       .reduce((sum, t) => sum + (t.amountPaid ?? 0), 0);
     const codi = tickets
-      .filter((t) => t.paymentMethod === 'CASH')
+      .filter((t) => t.paymentMethod === 'QR')
       .reduce((sum, t) => sum + (t.amountPaid ?? 0), 0);
     const oxxo = tickets
-      .filter((t) => t.paymentMethod === 'OXXO_PAY')
+      .filter((t) => t.paymentMethod === 'WALLET')
       .reduce((sum, t) => sum + (t.amountPaid ?? 0), 0);
 
     // Breakdown by zone
