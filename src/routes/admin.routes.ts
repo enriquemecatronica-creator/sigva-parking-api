@@ -2,6 +2,7 @@
 // Admin-only routes for SIGVA dashboard integration — authenticated by X-Admin-Key header
 
 import { Router, Request, Response, NextFunction } from 'express';
+import { createInfraction, listInfractions, updateInfraction } from '../controllers/infraction.controller';
 import { getAdminCajones, getAdminByPlate, getAdminRecaudacionHoy, getAdminQrCodes, addAdminZoneQr, updateAdminQr, updateAdminZone } from '../controllers/admin.controller';
 
 const router = Router();
@@ -45,5 +46,10 @@ router.put('/qr/:code', updateAdminQr);
 
 // PUT /api/v1/admin/zonas/:id — centro y radio GPS de la zona
 router.put('/zonas/:id', updateAdminZone);
+
+// Infracciones (inspector)
+router.post('/infracciones', createInfraction);        // registrar
+router.get('/infracciones', listInfractions);          // listar (hoy por defecto)
+router.patch('/infracciones/:folio', updateInfraction); // pagada / cancelada
 
 export default router;
