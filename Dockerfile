@@ -3,6 +3,9 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# OpenSSL required by Prisma on Alpine Linux
+RUN apk add --no-cache openssl
+
 # Install deps first (layer cache)
 COPY package*.json ./
 RUN npm install
@@ -22,6 +25,9 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+
+# OpenSSL required by Prisma on Alpine Linux
+RUN apk add --no-cache openssl
 
 # Only production deps
 COPY package*.json ./
