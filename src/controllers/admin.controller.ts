@@ -269,8 +269,11 @@ export async function updateAdminZone(req: Request, res: Response, next: NextFun
     const zone = await prisma.parkingZone.findUnique({ where: { id: String(req.params.id) } });
     if (!zone) return res.status(404).json({ success: false, message: 'Zona no encontrada' });
 
-    const { latitud, longitud, radioM } = req.body ?? {};
-    const data: { latitude?: number; longitude?: number; radiusM?: number } = {};
+    const { latitud, longitud, radioM, tarifaHora, horaApertura, horaCierre, nombre, direccion, activa } = req.body ?? {};
+    const data: {
+      latitude?: number; longitude?: number; radiusM?: number; ratePerHour?: number;
+      openTime?: string; closeTime?: string; name?: string; address?: string; isActive?: boolean;
+    } = {};
     if (latitud != null || longitud != null) {
       const lat = Number(latitud), lng = Number(longitud);
       if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
@@ -286,8 +289,69 @@ export async function updateAdminZone(req: Request, res: Response, next: NextFun
       }
       data.radiusM = r;
     }
+    if (tarifaHora != null) {
+      const t = Number(tarifaHora);
+      if (!Number.isFinite(t) || t < 0 || t > 500) {
+        return res.status(400).json({ success: false, message: 'tarifaHora debe ser un número entre 0 y 500' });
+      }
+      data.ratePerHour = Math.round(t * 100) / 100;
+    }
+    const hhmm = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (horaApertura != null) {
+      if (!hhmm.test(String(horaApertura))) return res.status(400).json({ success: false, message: 'horaApertura debe tener formato HH:MM' });
+      data.openTime = String(horaApertura);
+    }
+    if (horaCierre != null) {
+      if (!hhmm.test(String(horaCierre))) return res.status(400).json({ success: false, message: 'horaCierre debe tener formato HH:MM' });
+      data.closeTime = String(horaCierre);
+    }
+    if (nombre != null) {
+      const n = String(nombre).trim();
+      if (n.length < 3 || n.length > 80) return res.status(400).json({ success: false, message: 'El nombre debe tener entre 3 y 80 caracteres' });
+      data.name = n;
+    }
+    if (direccion != null) {
+      const d = String(direccion).trim();
+      if (d.length > 200) return res.status(400).json({ success: false, message: 'La dirección admite máximo 200 caracteres' });
+      data.address = d;
+    }
+    if (activa != null) data.isActive = activa === true || activa === 'true';
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ success: false, message: 'No se envió ningún cambio' });
+    }
     const updated = await prisma.parkingZone.update({ where: { id: zone.id }, data });
-    res.json({ success: true, data: { id: updated.id, zona: updated.name, latitud: updated.latitude, longitud: updated.longitude, radioM: updated.radiusM } });
+    res.json({ success: true, data: zoneAdminDto(updated) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+function zoneAdminDto(z: any, spots?: { status: string }[]) {
+  return {
+    id: z.id,
+    zona: z.name,
+    direccion: z.address,
+    latitud: z.latitude,
+    longitud: z.longitude,
+    radioM: z.radiusM,
+    tarifaHora: z.ratePerHour,
+    moneda: z.currency,
+    horaApertura: z.openTime,
+    horaCierre: z.closeTime,
+    activa: z.isActive,
+    ...(spots ? { cajones: spots.length, libres: spots.filter((s) => s.status === 'FREE').length } : {}),
+  };
+}
+
+// ─── GET /admin/zonas ─────────────────────────────────────────────────────────
+// Todas las zonas (activas e inactivas) con su configuración, para la pestaña Zonas del dashboard.
+export async function getAdminZonas(_req: Request, res: Response, next: NextFunction) {
+  try {
+    const zones = await prisma.parkingZone.findMany({
+      include: { spots: { select: { status: true } } },
+      orderBy: { name: 'asc' },
+    });
+    res.json({ success: true, data: zones.map((z) => zoneAdminDto(z, z.spots)) });
   } catch (err) {
     next(err);
   }
@@ -298,14 +362,15 @@ export async function updateAdminZone(req: Request, res: Response, next: NextFun
 // o una infracción. El dashboard la pregunta cada pocos segundos y solo recarga si cambió.
 export async function getAdminVersion(_req: Request, res: Response, next: NextFunction) {
   try {
-    const [spots, tickets, infractions, activos] = await Promise.all([
+    const [spots, tickets, infractions, activos, zonas] = await Promise.all([
       prisma.parkingSpot.aggregate({ _max: { updatedAt: true } }),
       prisma.parkingTicket.aggregate({ _max: { updatedAt: true } }),
       prisma.infraction.aggregate({ _max: { updatedAt: true } }),
       prisma.parkingTicket.count({ where: { status: 'ACTIVE' } }),
+      prisma.parkingZone.aggregate({ _max: { updatedAt: true } }),
     ]);
     const ms = (d: Date | null | undefined) => (d ? d.getTime() : 0);
-    const version = [ms(spots._max.updatedAt), ms(tickets._max.updatedAt), ms(infractions._max.updatedAt), activos].join('-');
+    const version = [ms(spots._max.updatedAt), ms(tickets._max.updatedAt), ms(infractions._max.updatedAt), activos, ms(zonas._max.updatedAt)].join('-');
     res.json({
       success: true,
       data: { version, activos, liberacionAutomaticaMin: autoReleaseConfig.minutes, timestamp: new Date().toISOString() },
