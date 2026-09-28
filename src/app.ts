@@ -13,6 +13,7 @@ import adminRouter from './routes/admin.routes';
 import downloadRouter from './routes/download.routes';
 import { errorHandler } from './middleware/errorHandler';
 import { mercadoPagoWebhook, paymentReturnPage } from './controllers/payments.controller';
+import legalRouter from './routes/legal.routes';
 
 const app = express();
 
@@ -72,6 +73,9 @@ app.use('/api/v1/auth/register', authLimiter);
 app.use('/api/v1/auth/forgot-password', authLimiter);
 app.use('/api/v1/auth/reset-password', authLimiter);
 app.use('/api/v1/auth/change-password', authLimiter);
+// Eliminar cuenta (app y página web) también pide contraseña: mismo límite estricto
+app.use('/api/v1/auth/me', (req, res, next) => (req.method === 'DELETE' ? authLimiter(req, res, next) : next()));
+app.use('/eliminar-cuenta', (req, res, next) => (req.method === 'POST' ? authLimiter(req, res, next) : next()));
 app.use('/api/', apiLimiter);
 
 // ─── Parsers ──────────────────────────────────────────────────────────────────
@@ -91,6 +95,7 @@ app.use('/api/v1/admin', adminRouter);   // Dashboard SIGVA — requiere X-Admin
 app.use('/descargar', downloadRouter);    // Destino de los QR de zona (solo descarga de la app)
 app.post('/api/v1/pagos/webhook', mercadoPagoWebhook); // Avisos de Mercado Pago (se verifica consultando su API)
 app.get('/pagos/retorno', paymentReturnPage);         // Página al volver de Mercado Pago
+app.use('/', legalRouter);                             // /privacidad, /terminos, /eliminar-cuenta (públicas)
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((_req, res) => {
