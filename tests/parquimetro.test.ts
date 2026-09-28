@@ -417,3 +417,87 @@ describe('Mercado Pago (listo para conectar)', () => {
     assert.equal(r.body.data.status, 'active');
   });
 });
+
+describe('Eliminar cuenta y páginas públicas', () => {
+  const U = 'u9';
+  beforeEach(async () => {
+    fake.db.users.push({ id: U, email: 'borrar@sigva.mx', name: 'Ana', phone: '9241112233', role: 'DRIVER', createdAt: new Date(), savedPlates: ['ABC1234'], password: await bcrypt.hash('Clave1234', 4), deletedAt: null });
+  });
+
+  test('pide la contraseña correcta', async () => {
+    const r = await call(account.deleteAccount, { userId: U, body: { password: 'mala' } });
+    assert.equal(r.statusCode, 400);
+    assert.equal(fake.db.users.find((u) => u.id === U)!.name, 'Ana');
+  });
+  test('no permite eliminar con una sesión activa', async () => {
+    fake.db.tickets.push({ id: 't-act', userId: U, spotId: 's-A-01', status: 'ACTIVE', updatedAt: new Date() });
+    const r = await call(account.deleteAccount, { userId: U, body: { password: 'Clave1234' } });
+    assert.equal(r.statusCode, 409);
+  });
+  test('borra los datos personales, conserva los tickets y bloquea el token', async () => {
+    fake.db.tickets.push({ id: 't-old', userId: U, spotId: 's-A-01', status: 'COMPLETED', amountPaid: 15, updatedAt: new Date() });
+    assert.equal(await account.isAccountUsable(U), true);
+    const r = await call(account.deleteAccount, { userId: U, body: { password: 'Clave1234' } });
+    assert.equal(r.statusCode, 200);
+    const u = fake.db.users.find((x) => x.id === U)!;
+    assert.equal(u.name, 'Cuenta eliminada');
+    assert.equal(u.phone, null);
+    assert.deepEqual(u.savedPlates, []);
+    assert.ok(u.deletedAt instanceof Date);
+    assert.ok(!u.email.includes('borrar'));
+    assert.equal(await bcrypt.compare('Clave1234', u.password), false);
+    assert.equal(fake.db.tickets.find((t) => t.id === 't-old')!.amountPaid, 15);
+    assert.equal(await account.isAccountUsable(U), false);
+    assert.equal((await call(account.deleteAccount, { userId: U, body: { password: 'Clave1234' } })).statusCode, 404);
+  });
+  test('las cuentas de administrador no se eliminan desde la app', async () => {
+    fake.db.users.find((x) => x.id === U)!.role = 'ADMIN';
+    assert.equal((await call(account.deleteAccount, { userId: U, body: { password: 'Clave1234' } })).statusCode, 403);
+  });
+
+  test('página web: formulario, error genérico y eliminación', async () => {
+    const page = async (method: string, body?: any) => {
+      const res: any = { statusCode: 200, headers: {} as any };
+      res.status = (c: number) => { res.statusCode = c; return res; };
+      res.type = () => res;
+      let resolve: () => void;
+      const done = new Promise<void>((r) => { resolve = r; });
+      res.send = (b: string) => { res.body = b; resolve(); return res; };
+      account.deleteAccountPage({ method, body } as any, res, (e: any) => { throw e; });
+      await done;
+      return res;
+    };
+    assert.match((await page('GET')).body, /<form method="post"/);
+    const bad = await page('POST', { email: 'borrar@sigva.mx', password: 'mala' });
+    assert.equal(bad.statusCode, 400);
+    assert.match(bad.body, /correo o la contraseña no son correctos/);
+    const nadie = await page('POST', { email: 'nadie@x.mx', password: 'x' });
+    assert.equal(nadie.statusCode, 400);
+    const ok = await page('POST', { email: 'BORRAR@sigva.mx', password: 'Clave1234' });
+    assert.equal(ok.statusCode, 200);
+    assert.doesNotMatch(ok.body, /<form/);
+    assert.equal(fake.db.users.find((x) => x.id === U)!.name, 'Cuenta eliminada');
+  });
+
+  test('aviso de privacidad y términos se sirven (con aviso de versión preliminar sin datos del responsable)', async () => {
+    const legal = require('../src/routes/legal.routes').default;
+    const get = async (url: string) => {
+      const layer = legal.stack.find((l: any) => l.route?.path === url && l.route.methods.get);
+      const res: any = { body: '', type: () => res, send: (b: string) => { res.body = b; return res; } };
+      layer.route.stack[0].handle({}, res, () => {});
+      return res.body as string;
+    };
+    delete process.env.LEGAL_RESPONSABLE;
+    const priv = await get('/privacidad');
+    assert.match(priv, /Aviso de privacidad/);
+    assert.match(priv, /Versión preliminar/);
+    process.env.LEGAL_RESPONSABLE = 'Responsable <Prueba>';
+    process.env.LEGAL_CONTACTO = 'privacidad@sigva.mx';
+    process.env.LEGAL_DOMICILIO = 'Monterrey, N.L.';
+    const ter = await get('/terminos');
+    assert.match(ter, /bloques de 15 minutos, de 15 a 120 minutos/);
+    assert.doesNotMatch(ter, /Versión preliminar/);
+    assert.match(ter, /Responsable &lt;Prueba&gt;/);
+    delete process.env.LEGAL_RESPONSABLE; delete process.env.LEGAL_CONTACTO; delete process.env.LEGAL_DOMICILIO;
+  });
+});
