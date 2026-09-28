@@ -169,3 +169,124 @@ export async function resetPassword(req: Request, res: Response, next: NextFunct
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
+
+// ─── Eliminar cuenta ──────────────────────────────────────────────────────────
+// Lo exigen App Store y Google Play. Se borran los datos personales (nombre,
+// correo, teléfono, placas guardadas y contraseña) y la cuenta queda inutilizable.
+// Los tickets y pagos se conservan, sin datos de contacto, para aclaraciones,
+// infracciones ya levantadas y la contabilidad de la recaudación.
+
+type DeleteResult = { status: number; message: string };
+
+async function eliminarUsuario(user: any, password: unknown): Promise<DeleteResult> {
+  if (!user || user.deletedAt) return { status: 404, message: 'La cuenta no existe o ya fue eliminada' };
+  if (String(user.role) !== 'DRIVER') {
+    return { status: 403, message: 'Las cuentas de operador o administrador se dan de baja desde SIGVA' };
+  }
+  if (typeof password !== 'string' || !(await bcrypt.compare(password, user.password))) {
+    return { status: 400, message: 'La contraseña no es correcta' };
+  }
+  const activa = await prisma.parkingTicket.findFirst({
+    where: { userId: user.id, status: { in: ['ACTIVE', 'PENDING_PAYMENT'] } },
+  });
+  if (activa) {
+    return { status: 409, message: 'Tienes una sesión de estacionamiento activa o pendiente de pago. Termínala antes de eliminar tu cuenta.' };
+  }
+  await prisma.passwordReset.updateMany({ where: { userId: user.id, usedAt: null }, data: { usedAt: new Date() } });
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      name: 'Cuenta eliminada',
+      email: `eliminada-${user.id}@sigva.invalid`,
+      phone: null,
+      savedPlates: [],
+      password: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10),
+      deletedAt: new Date(),
+    },
+  });
+  forgetAccountStatus(user.id);
+  return { status: 200, message: 'Tu cuenta se eliminó. Gracias por usar SIGVA Parquímetro.' };
+}
+
+// DELETE /auth/me  (desde la app, con sesión)  Body: { password }
+export async function deleteAccount(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: (req as any).userId } });
+    const r = await eliminarUsuario(user, req.body?.password);
+    res.status(r.status).json({ success: r.status === 200, message: r.message });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET/POST /eliminar-cuenta  (página web pública; Google Play pide un enlace así)
+export function deleteAccountPage(req: Request, res: Response, next: NextFunction) {
+  const render = (msg?: { ok: boolean; text: string }) =>
+    res.type('html').send(legalShell('Eliminar mi cuenta', `
+<p>Puedes eliminar tu cuenta de <b>SIGVA Parquímetro</b> desde la app (<b>Perfil → Mi cuenta → Eliminar mi cuenta</b>) o con este formulario.</p>
+<p>Se borran tu nombre, correo, teléfono, placas guardadas y contraseña. Los registros de tus sesiones y pagos se conservan sin tus datos de contacto para aclaraciones, infracciones ya levantadas y obligaciones contables.</p>
+${msg ? `<p class="${msg.ok ? 'ok' : 'err'}">${escapeHtml(msg.text)}</p>` : ''}
+${msg?.ok ? '' : `<form method="post" action="/eliminar-cuenta">
+  <label for="email">Correo de tu cuenta</label>
+  <input id="email" name="email" type="email" autocomplete="email" required>
+  <label for="password">Contraseña</label>
+  <input id="password" name="password" type="password" autocomplete="current-password" required>
+  <button type="submit">Eliminar mi cuenta definitivamente</button>
+</form>`}`));
+
+  if (req.method !== 'POST') return render();
+  (async () => {
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const user = email ? await prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } } }) : null;
+    // Mismo mensaje si el correo no existe o la contraseña es incorrecta
+    const r = user ? await eliminarUsuario(user, req.body?.password) : { status: 400, message: '' };
+    const text = r.status === 200 || r.status === 409 || r.status === 403 ? r.message : 'El correo o la contraseña no son correctos.';
+    res.status(r.status === 200 ? 200 : r.status === 409 || r.status === 403 ? r.status : 400);
+    render({ ok: r.status === 200, text });
+  })().catch(next);
+}
+
+// ─── Cuentas eliminadas: bloquear tokens que sigan vigentes ────────────────────
+// El middleware de autenticación consulta esto (con caché de 60 s por usuario).
+const statusCache = new Map<string, { ok: boolean; exp: number }>();
+
+export async function isAccountUsable(userId: string): Promise<boolean> {
+  const hit = statusCache.get(userId);
+  if (hit && hit.exp > Date.now()) return hit.ok;
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, deletedAt: true } });
+  const ok = !!u && !u.deletedAt;
+  statusCache.set(userId, { ok, exp: Date.now() + 60_000 });
+  if (statusCache.size > 5000) statusCache.clear();
+  return ok;
+}
+
+function forgetAccountStatus(userId: string) {
+  statusCache.set(userId, { ok: false, exp: Date.now() + 60_000 });
+}
+
+// ─── Plantilla de páginas públicas (privacidad, términos, eliminar cuenta) ────
+export function legalShell(title: string, body: string) {
+  return `<!doctype html>
+<html lang="es-MX"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(title)} · SIGVA Parquímetro</title>
+<style>
+  :root{--bg:#f6f7fb;--card:#fff;--ink:#16223a;--muted:#55627a;--line:#dfe4ee;--accent:#1e40af;--ok:#047857;--err:#b91c1c}
+  @media (prefers-color-scheme:dark){:root{--bg:#0b1220;--card:#121b2e;--ink:#e6edf7;--muted:#9fb0c8;--line:#24324d;--accent:#7aa2ff;--ok:#34d399;--err:#f87171}}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px 16px}
+  main{max-width:720px;margin:0 auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:24px 20px}
+  h1{font-size:24px;line-height:1.25;margin:0 0 4px}
+  h2{font-size:18px;margin:28px 0 8px}
+  .meta{color:var(--muted);font-size:14px;margin:0 0 20px}
+  .draft{background:#fef3c7;color:#78350f;border-radius:8px;padding:10px 12px;font-size:14px}
+  a{color:var(--accent)}
+  ul{padding-left:20px}
+  label{display:block;font-weight:600;margin:14px 0 4px}
+  input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;background:var(--bg);color:var(--ink)}
+  button{margin-top:18px;width:100%;padding:12px;border:0;border-radius:8px;background:var(--err);color:#fff;font:inherit;font-weight:700;cursor:pointer}
+  .ok{color:var(--ok);font-weight:600}.err{color:var(--err);font-weight:600}
+  footer{max-width:720px;margin:16px auto 0;color:var(--muted);font-size:13px;text-align:center}
+</style></head>
+<body><main><h1>${escapeHtml(title)}</h1>${body}</main>
+<footer><a href="/privacidad">Aviso de privacidad</a> · <a href="/terminos">Términos de uso</a> · <a href="/eliminar-cuenta">Eliminar mi cuenta</a></footer>
+</body></html>`;
+}
