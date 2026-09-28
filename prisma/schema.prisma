@@ -23,6 +23,8 @@ model User {
   updatedAt DateTime @updatedAt
   // Placas guardadas del conductor (máximo 5) para no escribirlas en cada sesión
   savedPlates String[] @default([])
+  // Si el conductor eliminó su cuenta: se borran sus datos personales y se marca la fecha
+  deletedAt   DateTime?
 
   tickets   ParkingTicket[]
   passwordResets PasswordReset[]
