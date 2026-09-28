@@ -90,7 +90,7 @@ export async function refreshToken(req: Request, res: Response, next: NextFuncti
 
     const payload = jwt.verify(token, JWT_REFRESH_SECRET) as { sub: string };
     const user = await prisma.user.findUnique({ where: { id: payload.sub } });
-    if (!user) {
+    if (!user || user.deletedAt) {
       return res.status(401).json({ success: false, message: 'Token inválido' });
     }
 
