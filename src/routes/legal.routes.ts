@@ -49,7 +49,7 @@ ${borrador(d.completo)}
   <li><b>Vehículo:</b> las placas que capturas al estacionarte y las que decides guardar en tu cuenta.</li>
   <li><b>Ubicación:</b> tu ubicación aproximada y su precisión <b>solo en el momento</b> en que inicias una sesión o buscas zonas cercanas, para confirmar en qué zona estás. La app no rastrea tu ubicación en segundo plano.</li>
   <li><b>Sesiones y pagos:</b> zona, cajón, horario, minutos, importe, estado del pago y comprobantes. Los pagos con tarjeta los procesa Mercado Pago; nosotros no recibimos ni guardamos los datos de tu tarjeta.</li>
-  <li><b>Datos técnicos:</b> dirección IP y registros de acceso para seguridad y para evitar abusos.</li>
+  <li><b>Datos técnicos:</b> dirección IP y registros de acceso para seguridad y para evitar abusos; y, en las versiones instaladas desde las tiendas, tiempos de arranque de la app y reportes de errores, asociados a un identificador anónimo de la instalación (no a tu nombre ni a tu cuenta).</li>
 </ul>
 <p>No recabamos datos personales sensibles.</p>
 
@@ -61,7 +61,7 @@ ${borrador(d.completo)}
 <ul>
   <li><b>Autoridad de movilidad o tránsito</b> del municipio donde te estacionas: placa, zona, cajón y vigencia del pago, para la verificación en calle y, en su caso, infracciones.</li>
   <li><b>Mercado Pago:</b> importe y referencia del pago, para procesarlo.</li>
-  <li><b>Proveedores que nos dan servicio</b> y que solo pueden usar los datos para ello: alojamiento de servidores y base de datos (Railway, Estados Unidos), distribución y actualización de la app (Expo, Estados Unidos) y envío de correos (Resend).</li>
+  <li><b>Proveedores que nos dan servicio</b> y que solo pueden usar los datos para ello: alojamiento de servidores y base de datos (Railway, Estados Unidos), distribución, actualización y medición del rendimiento de la app (Expo, Estados Unidos) y envío de correos (Resend).</li>
   <li><b>Autoridades competentes</b> cuando la ley lo requiera.</li>
 </ul>
 <p>No vendemos tus datos personales.</p>
