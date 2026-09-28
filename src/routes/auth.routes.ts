@@ -2,7 +2,7 @@
 
 import { Router } from 'express';
 import { register, login, refreshToken, me } from '../controllers/auth.controller';
-import { updateMe, getAccount, changePassword, forgotPassword, resetPassword } from '../controllers/account.controller';
+import { updateMe, getAccount, changePassword, forgotPassword, resetPassword, deleteAccount } from '../controllers/account.controller';
 import { authenticate } from '../middleware/auth';
 import { validate } from '../middleware/validate';
 import { loginSchema, registerSchema } from '../schemas/auth.schema';
@@ -25,6 +25,7 @@ router.get('/me', authenticate, me);
 router.get('/cuenta', authenticate, getAccount);            // datos + placas guardadas
 router.put('/me', authenticate, updateMe);                  // nombre, teléfono, placas
 router.post('/change-password', authenticate, changePassword);
+router.delete('/me', authenticate, deleteAccount);          // eliminar cuenta (pide contraseña)
 
 // Recuperar contraseña con código al correo (requiere RESEND_API_KEY y MAIL_FROM)
 router.post('/forgot-password', forgotPassword);
